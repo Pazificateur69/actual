@@ -199,16 +199,21 @@ export function createSpendingSpreadsheet({
         !cond.customName &&
         (cond.field === 'category' || cond.field === 'category_group'),
     );
+    const { list: categories, grouped: categoryGroups } =
+      await send('get-categories');
     const budgetFilters = hasBudgetConditions
-      ? await send('get-categories').then(({ list, grouped }) =>
-          getSpendingBudgetFilters({
-            categories: list,
-            categoryGroups: grouped,
-            conditions,
-            conditionsOp,
-          }),
-        )
+      ? getSpendingBudgetFilters({
+          categories,
+          categoryGroups,
+          conditions,
+          conditionsOp,
+        })
       : [];
+    // Income is never counted as spending above, so its budget (tracking
+    // budgets let you budget income) must not count towards Budgeted either.
+    const incomeCategoryIds = new Set(
+      categories.filter(category => category.is_income).map(({ id }) => id),
+    );
     const [budgets] = await Promise.all([
       aqlQuery(
         q(budgetTable)
@@ -225,7 +230,9 @@ export function createSpendingSpreadsheet({
 
     const dailyBudget =
       budgets &&
-      budgets.reduce((a, v) => a + v.amount, 0) / compareInterval.length;
+      budgets
+        .filter(budget => !incomeCategoryIds.has(budget.category))
+        .reduce((a, v) => a + v.amount, 0) / compareInterval.length;
 
     const intervals = monthUtils.dayRangeInclusive(startDate, endDate);
     if (endDateTo < startDate || startDateTo > endDate) {
